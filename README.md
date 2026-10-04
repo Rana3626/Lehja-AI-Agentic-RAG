@@ -1,5 +1,12 @@
 # Lehja-AI-Agentic-RAG
 
+**Team Members:**
+
+- Sozan Mahmoud Alkouz — Department of Artificial Intelligence, The University of Jordan — soz02494@ju.edu.jo
+- Rana Mohammed Mahmoud — Department of Artificial Intelligence, The University of Jordan — rna0248513@ju.edu.jo
+- Rozan Issa Udwan — Department of Artificial Intelligence, The University of Jordan — roz0239089@ju.edu.jo
+- Rahma Sami Albdour — Department of Chemistry, The University of Jordan — rhm0243156@ju.edu.jo
+
 An agentic Retrieval-Augmented Generation (RAG) platform for teaching Levantine Arabic to non-native speakers.
 
 ## Project Overview
