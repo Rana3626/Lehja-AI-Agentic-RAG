@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lehja AI — Your Levantine Arabic Tutor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     SCREEN 1 · LOGIN
+============================================================= -->
+<section id="screen-login" class="screen active">
+  <div class="login-layout">
+
+    <!-- Left : form -->
+    <div class="login-left">
+      <div class="login-form-wrap">
+        <div class="brand">
+          <span class="brand-mark">
+            <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+              <path d="M12 3.5 5 18h3.2l1.3-2.9h5l1.3 2.9H19L12 3.5Zm0 5.6 1.6 3.6h-3.2L12 9.1Z" fill="#fff"/>
+            </svg>
+          </span>
+          <span class="brand-name">Lehja <em>AI</em></span>
+        </div>
+
+       <h1 class="login-title" id="auth-title">
+  Welcome back
+</h1>
+
+<p class="login-sub" id="auth-subtitle">
+  Sign in to keep learning Levantine Arabic.
+</p>
+        <form id="login-form" novalidate>
+          <label class="field">
+            <span class="field-label">Email</span>
+            <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email" />
+          </label>
+          <label class="field">
+  <span class="field-label">Password</span>
+  <input
+    type="password"
+    id="login-password"
+    placeholder="••••••••"
+    autocomplete="current-password"
+  />
+</label>
+
+<!-- Placement test language -->
+<fieldset class="language-picker">
+  <legend class="field-label">Choose the placement-test language</legend>
+
+  <div class="language-options">
+
+    <label class="language-option">
+      <input
+        type="radio"
+        name="placement-language"
+        value="MSA"
+        checked
+      />
+
+      <span class="language-card" dir="rtl">
+        <strong>العربية</strong>
+        <small>الأسئلة باللغة العربية الفصحى</small>
+      </span>
+    </label>
+
+    <label class="language-option">
+      <input
+        type="radio"
+        name="placement-language"
+        value="English"
+      />
+
+      <span class="language-card">
+        <strong>English</strong>
+        <small>Questions in English</small>
+      </span>
+    </label>
+
+  </div>
+</fieldset>
+
+<button
+  type="submit"
+  class="btn-primary btn-block"
+  id="auth-submit"
+>
+  Log in
+</button>
+        </form>
+
+        <p class="login-alt" id="auth-switch-text">
+  New here?
+  <a href="#" id="create-account-link">
+    Create an account
+  </a>
+</p>
+      </div>
+    </div>
+
+    <!-- Right : brand panel -->
+    <div class="login-right">
+      <div class="login-right-inner">
+        <span class="hero-chip hero-chip-top" dir="rtl">أهلا وسهلا</span>
+        <h2 class="hero-title">Your personal<br />Levantine tutor.</h2>
+        <p class="hero-sub">Chat, learn, and take smart quizzes — all in one place.</p>
+        <div class="hero-chips">
+          <span class="hero-chip" dir="rtl">مرحبا</span>
+          <span class="hero-chip" dir="rtl">كيفك</span>
+          <span class="hero-chip" dir="rtl">شو الأخبار</span>
+          <span class="hero-chip" dir="rtl">يلا</span>
+        </div>
+      </div>
+      <div class="hero-orb hero-orb-a"></div>
+      <div class="hero-orb hero-orb-b"></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     SCREEN 2 · PLACEMENT TEST
+============================================================= -->
+<section id="screen-test" class="screen">
+  <div class="test-layout">
+    <div class="test-top">
+      <div class="brand">
+        <span class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+            <path d="M12 3.5 5 18h3.2l1.3-2.9h5l1.3 2.9H19L12 3.5Zm0 5.6 1.6 3.6h-3.2L12 9.1Z" fill="#fff"/>
+          </svg>
+        </span>
+        <span class="brand-name">Lehja <em>AI</em></span>
+      </div>
+      <div class="test-progress-track"><div class="test-progress-fill" id="test-progress-fill"></div></div>
+      <p class="test-progress-label" id="test-progress-label">Question 1 of 5</p>
+    </div>
+
+    <div class="test-card" id="test-card">
+      <p class="eyebrow" id="test-eyebrow">
+  Placement test
+</p>
+      <h2 class="test-question" id="test-question">…</h2>
+      <div class="test-options" id="test-options"></div>
+      <div class="test-actions">
+        <button class="btn-ghost" id="test-back" type="button">Back</button>
+        <button class="btn-primary" id="test-next" type="button" disabled>Next</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     SCREEN 3 · PREPARING PERSONALIZED LESSONS
+============================================================= -->
+<section id="screen-preparing" class="screen">
+  <div class="prep-bg">
+    <div class="prep-orb prep-orb-green"></div>
+    <div class="prep-orb prep-orb-purple"></div>
+    <div class="prep-grid"></div>
+  </div>
+
+  <div class="prep-content">
+    <div class="prep-bot-wrap">
+      <div class="prep-bot-ring"></div>
+      <div class="prep-bot">
+        <svg viewBox="0 0 64 64" width="44" height="44" fill="none" aria-hidden="true">
+          <!-- antenna -->
+          <line x1="32" y1="8" x2="32" y2="15" stroke="#0ea371" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="32" cy="6.5" r="3" fill="#34d399"/>
+          <!-- head -->
+          <rect x="12" y="15" width="40" height="32" rx="12" fill="url(#botGrad)"/>
+          <!-- eyes -->
+          <circle class="bot-eye" cx="24.5" cy="31" r="3.6" fill="#fff"/>
+          <circle class="bot-eye" cx="39.5" cy="31" r="3.6" fill="#fff"/>
+          <!-- smile -->
+          <path d="M26 39.5c1.8 1.8 4.2 2.7 6 2.7s4.2-.9 6-2.7" stroke="#fff" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+          <!-- ears -->
+          <rect x="7" y="26" width="5" height="11" rx="2.5" fill="#a7f3d0"/>
+          <rect x="52" y="26" width="5" height="11" rx="2.5" fill="#a7f3d0"/>
+          <defs>
+            <linearGradient id="botGrad" x1="12" y1="15" x2="52" y2="47" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#10b981"/>
+              <stop offset="1" stop-color="#047857"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <span class="prep-spark s1">✦</span>
+      <span class="prep-spark s2">✦</span>
+      <span class="prep-spark s3">✦</span>
+    </div>
+
+    <p class="prep-badge" id="prep-badge">Level detected</p>
+    <h2 class="prep-title">I'm preparing your personalized lessons for you<span class="prep-ellipsis"><span>.</span><span>.</span><span>.</span></span></h2>
+    <p class="prep-sub">Your lessons are being prepared based on your placement test level.</p>
+
+    <div class="prep-bar-track" role="progressbar" aria-label="Preparing lessons">
+      <div class="prep-bar-fill" id="prep-bar-fill"><div class="prep-bar-shine"></div></div>
+    </div>
+
+    <p class="prep-step" id="prep-step">Analyzing your placement results…</p>
+  </div>
+</section>
+
+<!-- ============================================================
+     SCREEN 4 · MAIN CHAT DASHBOARD
+============================================================= -->
+<section id="screen-app" class="screen">
+
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+          <path d="M12 3.5 5 18h3.2l1.3-2.9h5l1.3 2.9H19L12 3.5Zm0 5.6 1.6 3.6h-3.2L12 9.1Z" fill="#fff"/>
+        </svg>
+      </span>
+      <span class="brand-name">Lehja <em>AI</em></span>
+    </div>
+
+    <div class="mode-toggle" role="tablist" aria-label="Chat mode">
+      <button class="mode-btn active" id="mode-question" role="tab" aria-selected="true" type="button">Question Mode</button>
+      <button class="mode-btn" id="mode-learning" role="tab" aria-selected="false" type="button">Learning Mode</button>
+      <span class="mode-pill" id="mode-pill"></span>
+    </div>
+
+    <div class="profile-area">
+      <button class="profile-btn" id="profile-btn" type="button" aria-haspopup="true" aria-expanded="false">
+        <span class="avatar" id="profile-avatar">SA</span>
+        <span class="profile-meta">
+          <span class="profile-name" id="profile-name">Sami Ahmad</span>
+          <span class="profile-email" id="profile-email">sami@example.com</span>
+        </span>
+        <svg class="profile-caret" width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
+      <!-- Profile dropdown -->
+      <div class="profile-dropdown" id="profile-dropdown" hidden>
+        <p class="dropdown-title">Edit profile</p>
+        <label class="field field-sm">
+          <span class="field-label">Name</span>
+          <input type="text" id="edit-name" />
+        </label>
+        <label class="field field-sm">
+          <span class="field-label">Email</span>
+          <input type="email" id="edit-email" />
+        </label>
+        <label class="field field-sm">
+          <span class="field-label">Password</span>
+          <input type="password" id="edit-password" placeholder="••••••••" />
+        </label>
+        <button class="btn-primary btn-block" id="save-profile" type="button">Save changes</button>
+        <p class="save-confirm" id="save-confirm" hidden>Profile updated ✓</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="chat-shell">
+
+    <!-- Learning progress card (Learning Mode only) -->
+    <div class="progress-card" id="progress-card" hidden>
+      <div class="progress-card-stats">
+        <div class="stat">
+          <span class="stat-label">Current level</span>
+          <span class="stat-value" id="stat-level">Level 3</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Words completed</span>
+          <span class="stat-value" id="stat-words">0 / 0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Words remaining</span>
+          <span class="stat-value" id="stat-remaining">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Level progress</span>
+          <span class="stat-value accent" id="stat-progress">0%</span>
+        </div>
+      </div>
+      <div class="progress-card-bar"><div class="progress-card-fill" id="progress-card-fill" style="width:0%"></div></div>
+    </div>
+
+    <!-- Messages -->
+    <div class="chat-messages" id="chat-messages"></div>
+
+    <!-- Composer -->
+    <div class="composer-area">
+      <div class="prompt-chips" id="prompt-chips"></div>
+      <form class="composer" id="composer">
+        <input type="text" id="chat-input" placeholder="Ask anything about Levantine Arabic..." autocomplete="off" />
+        <button type="submit" class="send-btn" aria-label="Send message">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M22 2 11 13" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M22 2 15 22l-4-9-9-4 20-7Z" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </form>
+      <p class="composer-hint">Lehja may make mistakes. Verify important phrases.</p>
+    </div>
+
+  </main>
+</section>
+
+<script src="script.js"></script>
+<script src="auth.js"></script></body>
+</html>
