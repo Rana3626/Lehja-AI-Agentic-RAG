@@ -1,555 +1,2226 @@
 /* ============================================================
-   Lehja AI — style.css
-   Palette: emerald primary on clean white, soft shadows
+   Lehja AI — script.js
+   Flow: Login → Placement Test → Preparing → Chat Dashboard
+   Frontend connected to one n8n Webhook
 ============================================================ */
 
-:root {
-  --emerald-600: #059669;
-  --emerald-500: #10b981;
-  --emerald-400: #34d399;
-  --emerald-100: #d1fae5;
-  --emerald-50:  #ecfdf5;
-  --ink-900: #0f172a;
-  --ink-700: #334155;
-  --ink-500: #64748b;
-  --ink-400: #94a3b8;
-  --line: #e2e8f0;
-  --bg: #ffffff;
-  --bg-soft: #f8fafc;
-  --purple-soft: #ede9fe;
-  --radius-lg: 20px;
-  --radius-md: 14px;
-  --radius-sm: 10px;
-  --shadow-soft: 0 8px 30px rgba(15, 23, 42, 0.06);
-  --shadow-card: 0 12px 40px rgba(15, 23, 42, 0.08);
-  --font-latin: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-arabic: "IBM Plex Sans Arabic", "Plus Jakarta Sans", sans-serif;
+"use strict";
+
+/* ============================================================
+   0 · CONFIGURATION
+============================================================ */
+const CONFIG = {
+  // During testing, keep n8n listening for a test event and use /webhook-test/.
+  webhookUrl:
+    "https://n8n.169.58.245.203.sslip.io/webhook/1eb8fed0-7931-49ad-a769-8f2427743309",
+
+  // After activating the workflow, replace the URL above with the Production URL:
+  // webhookUrl: "http://127.0.0.1:5678/webhook/1eb8fed0-7931-49ad-a769-8f2427743309",
+
+  requestTimeoutMs: 180000,
+};
+
+/* ============================================================
+   1 · APP STATE
+============================================================ */
+const state = {
+  user: {
+    id: createId("user"),
+    name: "Sami Ahmad",
+    email: "sami@example.com",
+    testLanguage: "MSA",
+    preferredLanguage: "MSA",
+  },
+
+  // One session for the chat/memory workflow.
+  sessionId: createId("chat"),
+
+  // A separate session for the placement test.
+  placementSessionId: null,
+  placementLevel: 1,
+  currentMicroLevel: 1,
+  testLanguage: "MSA",
+
+  mode: "question",
+  isSendingMessage: false,
+
+  wordsCompleted: 0,
+  wordsTotal: 0,
+};
+
+const placementState = {
+  selectedAnswer: null,
+  currentQuestion: null,
+};
+
+/* ============================================================
+   2 · DOM REFERENCES
+============================================================ */
+const screens = {
+  login: document.getElementById("screen-login"),
+  test: document.getElementById("screen-test"),
+  preparing: document.getElementById("screen-preparing"),
+  app: document.getElementById("screen-app"),
+};
+
+const loginForm =
+  document.getElementById("login-form");
+
+const loginEmail =
+  document.getElementById("login-email");
+
+const loginPassword =
+  document.getElementById("login-password");
+const loginSubmitButton = loginForm.querySelector('button[type="submit"]');
+const createAccountLink = document.getElementById("create-account-link");
+const placementLanguageInputs = [
+  ...document.querySelectorAll(
+    'input[name="placement-language"]'
+  ),
+];
+const elTestFill = document.getElementById("test-progress-fill");
+const elTestLabel = document.getElementById("test-progress-label");
+const elTestQuestion = document.getElementById("test-question");
+const elTestEyebrow = document.getElementById("test-eyebrow");
+const elTestOptions = document.getElementById("test-options");
+const elTestCard = document.getElementById("test-card");
+const btnTestBack = document.getElementById("test-back");
+const btnTestNext = document.getElementById("test-next");
+
+const elMessages = document.getElementById("chat-messages");
+const elChips = document.getElementById("prompt-chips");
+const elInput = document.getElementById("chat-input");
+const composer = document.getElementById("composer");
+const composerSubmitButton = composer.querySelector('button[type="submit"]');
+const elProgressCard = document.getElementById("progress-card");
+const modeBtnQuestion = document.getElementById("mode-question");
+const modeBtnLearning = document.getElementById("mode-learning");
+const modePill = document.getElementById("mode-pill");
+
+const profileBtn = document.getElementById("profile-btn");
+const profileDropdown = document.getElementById("profile-dropdown");
+const editName = document.getElementById("edit-name");
+const editEmail = document.getElementById("edit-email");
+const editPassword = document.getElementById("edit-password");
+const saveConfirm = document.getElementById("save-confirm");
+
+/* ============================================================
+   3 · GENERAL HELPERS
+============================================================ */
+function createId(prefix = "id") {
+  const randomPart =
+    globalThis.crypto && typeof globalThis.crypto.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  return `${prefix}-${randomPart}`;
+}
+function getSessionStorageKey(email) {
+  return `lehja_session_${String(email ?? "")
+    .trim()
+    .toLowerCase()}`;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+function getOrCreateSessionId(email) {
+  const key = getSessionStorageKey(email);
 
-html, body { height: 100%; }
+  let sessionId = localStorage.getItem(key);
 
-body {
-  font-family: var(--font-latin);
-  color: var(--ink-900);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
+  if (!sessionId) {
+    sessionId = createId("chat");
+    localStorage.setItem(key, sessionId);
+  }
+
+  return sessionId;
+}
+/* ============================================================
+   PERSISTENT LOGIN — 12 HOURS
+============================================================ */
+
+const LEHJA_AUTH_KEY = "lehja_auth_session_v1";
+const LEHJA_AUTH_DURATION_MS = 12 * 60 * 60 * 1000;
+
+let lehjaAutoLogoutTimer = null;
+
+function getPersistentLogin() {
+  const raw = localStorage.getItem(LEHJA_AUTH_KEY);
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const data = JSON.parse(raw);
+
+    if (
+      !data ||
+      !data.email ||
+      !data.userId ||
+      !data.expiresAt
+    ) {
+      localStorage.removeItem(LEHJA_AUTH_KEY);
+      return null;
+    }
+
+    if (Number(data.expiresAt) <= Date.now()) {
+      localStorage.removeItem(LEHJA_AUTH_KEY);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Invalid saved login:", error);
+
+    localStorage.removeItem(LEHJA_AUTH_KEY);
+    return null;
+  }
 }
 
-[dir="rtl"], [dir="auto"] { font-family: var(--font-arabic); }
 
-/* ---------- Screens ---------- */
-.screen { display: none; min-height: 100vh; }
-.screen.active { display: block; animation: screenIn 0.45s ease both; }
+function savePersistentLogin() {
+  const existing = getPersistentLogin();
 
-@keyframes screenIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: none; }
+  /*
+    لا نمدد الـ12 ساعة مع كل request.
+    إذا في login صالح، نحافظ على نفس expiresAt.
+  */
+  const expiresAt =
+    existing?.expiresAt ??
+    (Date.now() + LEHJA_AUTH_DURATION_MS);
+
+  const data = {
+    userId: state.user.id,
+    email: state.user.email,
+    name: state.user.name,
+
+    preferredLanguage:
+      state.user.preferredLanguage,
+
+    testLanguage:
+      state.testLanguage,
+
+    placementLevel:
+      state.placementLevel,
+
+    currentMicroLevel:
+      state.currentMicroLevel,
+
+    sessionId:
+      state.sessionId,
+
+    mode:
+      state.mode,
+
+    wordsCompleted:
+      state.wordsCompleted,
+
+    wordsTotal:
+      state.wordsTotal,
+
+    expiresAt,
+  };
+
+  localStorage.setItem(
+    LEHJA_AUTH_KEY,
+    JSON.stringify(data)
+  );
+
+  scheduleAutoLogout(expiresAt);
 }
 
-/* ---------- Shared: brand ---------- */
-.brand { display: inline-flex; align-items: center; gap: 10px; }
-.brand-mark {
-  width: 38px; height: 38px; border-radius: 12px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--emerald-500), var(--emerald-600));
-  box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35);
-}
-.brand-name { font-size: 19px; font-weight: 800; letter-spacing: -0.02em; }
-.brand-name em { font-style: normal; color: var(--emerald-600); }
 
-/* ---------- Shared: buttons & fields ---------- */
-.btn-primary {
-  border: none; cursor: pointer;
-  background: linear-gradient(135deg, var(--emerald-500), var(--emerald-600));
-  color: #fff; font-family: inherit; font-weight: 700; font-size: 15px;
-  padding: 13px 26px; border-radius: var(--radius-md);
-  box-shadow: 0 8px 20px rgba(5, 150, 105, 0.28);
-  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-}
-.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 26px rgba(5, 150, 105, 0.36); }
-.btn-primary:active:not(:disabled) { transform: translateY(0); }
-.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
-.btn-block { width: 100%; }
+function scheduleAutoLogout(expiresAt) {
+  if (lehjaAutoLogoutTimer) {
+    clearTimeout(lehjaAutoLogoutTimer);
+  }
 
-.btn-ghost {
-  border: none; background: transparent; cursor: pointer;
-  color: var(--ink-500); font-family: inherit; font-weight: 600; font-size: 15px;
-  padding: 13px 18px; border-radius: var(--radius-md);
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.btn-ghost:hover { background: var(--bg-soft); color: var(--ink-700); }
+  const remaining =
+    Number(expiresAt) - Date.now();
 
-.field { display: block; margin-bottom: 18px; }
-.field-label { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink-700); margin-bottom: 7px; }
-.field input {
-  width: 100%; font-family: inherit; font-size: 15px; color: var(--ink-900);
-  padding: 13px 16px; border: 1.5px solid var(--line); border-radius: var(--radius-md);
-  background: #fff; outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.field input::placeholder { color: var(--ink-400); }
-.field input:focus { border-color: var(--emerald-500); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12); }
+  if (remaining <= 0) {
+    logoutFromLehja();
+    return;
+  }
 
-.eyebrow {
-  font-size: 12px; font-weight: 800; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--emerald-600); margin-bottom: 10px;
+  lehjaAutoLogoutTimer =
+    setTimeout(
+      logoutFromLehja,
+      remaining
+    );
+}
+
+
+function logoutFromLehja() {
+  localStorage.removeItem(
+    LEHJA_AUTH_KEY
+  );
+
+  if (lehjaAutoLogoutTimer) {
+    clearTimeout(
+      lehjaAutoLogoutTimer
+    );
+
+    lehjaAutoLogoutTimer = null;
+  }
+
+  /*
+    نمسح فقط login المحلي.
+    لا نمسح learning session أو progress من n8n.
+  */
+  window.location.reload();
+}
+
+
+function restorePersistentLogin() {
+  const saved = getPersistentLogin();
+
+  if (!saved) {
+    return false;
+  }
+
+  state.user.id =
+    saved.userId;
+
+  state.user.email =
+    saved.email;
+
+  state.user.name =
+    saved.name ||
+    getDisplayNameFromEmail(
+      saved.email
+    );
+
+  state.user.preferredLanguage =
+    normalizeInterfaceLanguage(
+      saved.preferredLanguage ||
+      saved.testLanguage ||
+      "MSA"
+    );
+
+  state.user.testLanguage =
+    normalizeInterfaceLanguage(
+      saved.testLanguage ||
+      saved.preferredLanguage ||
+      "MSA"
+    );
+
+  state.testLanguage =
+    state.user.testLanguage;
+
+  state.placementLevel =
+    Math.max(
+      1,
+      Number(saved.placementLevel) || 1
+    );
+
+  state.currentMicroLevel =
+    Math.max(
+      1,
+      Number(saved.currentMicroLevel) || 1
+    );
+
+  state.wordsCompleted =
+    Math.max(
+      0,
+      Number(saved.wordsCompleted) || 0
+    );
+
+  state.wordsTotal =
+    Math.max(
+      state.wordsCompleted,
+      Number(saved.wordsTotal) || 0
+    );
+
+  state.sessionId =
+    saved.sessionId ||
+    getOrCreateSessionId(
+      saved.email
+    );
+
+  state.mode =
+    saved.mode === "learning"
+      ? "learning"
+      : "question";
+
+  refreshProfileUI();
+  applyDashboardLanguage();
+  updateProgressUI();
+
+  showScreen("app");
+
+  if (state.mode === "learning") {
+    setMode("learning", true);
+  } else {
+    setMode("question", true);
+  }
+
+  scheduleAutoLogout(
+    saved.expiresAt
+  );
+
+  addLogoutButton();
+
+  return true;
+}
+
+
+function addLogoutButton() {
+  let button =
+    document.getElementById(
+      "lehja-logout-btn"
+    );
+
+  if (!button) {
+    button =
+      document.createElement(
+        "button"
+      );
+
+    button.id =
+      "lehja-logout-btn";
+
+    button.type =
+      "button";
+
+    button.style.width =
+      "100%";
+
+    button.style.marginTop =
+      "12px";
+
+    button.style.padding =
+      "10px 12px";
+
+    button.style.cursor =
+      "pointer";
+
+    button.addEventListener(
+      "click",
+      logoutFromLehja
+    );
+
+    profileDropdown.appendChild(
+      button
+    );
+  }
+
+  button.textContent =
+    state.user.preferredLanguage ===
+    "English"
+      ? "Log out"
+      : "تسجيل الخروج";
+}
+function showScreen(name) {
+  Object.values(screens).forEach((screen) => screen.classList.remove("active"));
+  screens[name].classList.add("active");
+  window.scrollTo(0, 0);
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+function getSelectedTestLanguage() {
+  const selectedInput = placementLanguageInputs.find(
+    (input) => input.checked
+  );
+
+  return selectedInput?.value === "English"
+    ? "English"
+    : "MSA";
+}
+
+function normalizeInterfaceLanguage(value) {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  return normalized === "english" || normalized === "en"
+    ? "English"
+    : "MSA";
+}
+
+function isArabicPlacementTest() {
+  return state.testLanguage === "MSA";
+}
+
+function isArabicUI() {
+  return state.user.preferredLanguage !== "English";
+}
+
+function updateLoginButtonLanguage() {
+  const selectedLanguage =
+    getSelectedTestLanguage();
+
+  loginSubmitButton.textContent =
+    selectedLanguage === "MSA"
+      ? "ابدأ الاختبار"
+      : "Start test";
+}
+
+placementLanguageInputs.forEach((input) => {
+  input.addEventListener(
+    "change",
+    updateLoginButtonLanguage
+  );
+});
+
+updateLoginButtonLanguage();
+function getDisplayNameFromEmail(email) {
+  const username = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+
+  if (!username) return "Learner";
+
+  return username
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function initials(name) {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word[0].toUpperCase())
+      .join("") || "U"
+  );
+}
+
+function toNumber(value, fallback = null) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function toBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    return ["true", "1", "yes", "finished", "done"].includes(
+      value.trim().toLowerCase()
+    );
+  }
+  return false;
+}
+
+function firstDefined(...values) {
+  return values.find(
+    (value) => value !== undefined && value !== null && value !== ""
+  );
+}
+
+function tryParseJson(value) {
+  if (typeof value !== "string") return value;
+
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function unwrapN8nPayload(payload) {
+  let result = payload;
+
+  if (Array.isArray(result)) {
+    result = result.length === 1 ? result[0] : { items: result };
+  }
+
+  result = tryParseJson(result);
+
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return { output: result };
+  }
+
+  // Some Respond to Webhook nodes return the actual response inside body/data.
+  const body = tryParseJson(result.body);
+  if (
+    body &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    (body.question !== undefined ||
+      body.reply !== undefined ||
+      body.output !== undefined ||
+      body.finished !== undefined ||
+      body.options !== undefined)
+  ) {
+    return body;
+  }
+
+  const data = tryParseJson(result.data);
+  if (
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    (data.question !== undefined ||
+      data.reply !== undefined ||
+      data.output !== undefined ||
+      data.finished !== undefined ||
+      data.options !== undefined)
+  ) {
+    return data;
+  }
+
+  return result;
+}
+
+async function postToN8n(payload) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    CONFIG.requestTimeoutMs
+  );
+
+  try {
+    const response = await fetch(CONFIG.webhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/plain, */*",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    const responseText = await response.text();
+    const parsedResponse = responseText ? tryParseJson(responseText) : {};
+    const data = unwrapN8nPayload(parsedResponse);
+
+    if (!response.ok) {
+      const message = firstDefined(
+        data.error,
+        data.message,
+        responseText,
+        `n8n request failed with HTTP ${response.status}`
+      );
+      throw new Error(String(message));
+    }
+
+    if (data.ok === false) {
+      throw new Error(String(firstDefined(data.error, data.message, "Request failed")));
+    }
+
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("The n8n request timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function parseOptions(rawOptions) {
+  let options = tryParseJson(rawOptions);
+
+  if (options && typeof options === "object" && !Array.isArray(options)) {
+    options = Object.values(options);
+  }
+
+  if (typeof options === "string") {
+    options = options
+      .split(/\r?\n|\s*\|\s*|\s*,\s*/)
+      .map((option) => option.trim())
+      .filter(Boolean);
+  }
+
+  if (!Array.isArray(options)) return [];
+
+  return options
+    .map((option) => {
+      if (option && typeof option === "object") {
+        return {
+          label: String(
+            firstDefined(option.label, option.text, option.option, option.value, "")
+          ),
+          value: String(
+            firstDefined(option.value, option.answer, option.label, option.text, "")
+          ),
+        };
+      }
+
+      return {
+        label: String(option),
+        value: String(option),
+      };
+    })
+    .filter((option) => option.label);
 }
 
 /* ============================================================
-   1 · LOGIN
+   4 · LOGIN AND PLACEMENT TEST
 ============================================================ */
-.login-layout { display: grid; grid-template-columns: 1fr 1.05fr; min-height: 100vh; }
+loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
 
-.login-left {
-  display: flex; align-items: center; justify-content: center;
-  padding: 48px 32px;
-  background: linear-gradient(180deg, #fff 0%, var(--emerald-50) 130%);
+  const email = loginEmail.value.trim();
+  const password =
+  loginPassword.value;
+  if (!isValidEmail(email)) {
+    loginEmail.focus();
+    window.alert(
+      "Please enter a valid email address."
+    );
+
+    return;
+  }
+  if (password.length < 4) {
+  loginPassword.focus();
+
+  window.alert(
+    "Password must contain at least 4 characters."
+  );
+
+  return;
 }
-.login-form-wrap { width: 100%; max-width: 420px; }
-.login-form-wrap .brand { margin-bottom: 42px; }
 
-.login-title { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 10px; }
-.login-sub { color: var(--ink-500); font-size: 15.5px; margin-bottom: 34px; }
+  // Take the language selected by the user
+  state.testLanguage =
+    getSelectedTestLanguage();
 
-#login-form .btn-primary { margin-top: 6px; }
-.login-alt { text-align: center; margin-top: 26px; font-size: 14.5px; color: var(--ink-500); font-weight: 500; }
-.login-alt a { color: var(--emerald-600); font-weight: 700; text-decoration: none; }
-.login-alt a:hover { text-decoration: underline; }
+  state.user.testLanguage =
+    state.testLanguage;
 
-.login-right {
-  position: relative; overflow: hidden;
-  display: flex; align-items: center;
-  background: linear-gradient(160deg, #059669 0%, #047857 55%, #065f46 100%);
-  padding: 64px;
+  state.user.preferredLanguage =
+    normalizeInterfaceLanguage(
+      state.testLanguage
+    );
+
+  state.user.email = email;
+  state.user.name =
+    getDisplayNameFromEmail(email);
+
+  state.user.id =
+    `user-${email.toLowerCase()}`;
+    state.sessionId =
+  getOrCreateSessionId(email);
+
+await startPlacementFromServer(password);
+});
+
+createAccountLink.addEventListener("click", (event) => {
+  event.preventDefault();
+  loginForm.requestSubmit();
+});
+
+async function startPlacementFromServer(password) {
+  const originalButtonText = loginSubmitButton.textContent;
+  loginSubmitButton.disabled = true;
+  loginSubmitButton.textContent =
+  isArabicPlacementTest()
+    ? "جاري بدء الاختبار..."
+    : "Starting test...";
+
+  state.placementSessionId = createId("placement");
+  placementState.selectedAnswer = null;
+  placementState.currentQuestion = null;
+
+  try {
+    const data = await postToN8n({
+      mode: "placement",
+      action: "start",
+      user_id: state.user.id,
+      session_id: state.placementSessionId,
+      placement_session_id: state.placementSessionId,
+      email: state.user.email,
+      password: password,
+test_language: state.testLanguage,    });
+
+    const normalized = normalizePlacementResponse(data);
+
+    state.user.preferredLanguage =
+      normalizeInterfaceLanguage(
+        normalized.preferredLanguage
+      );
+
+    if (normalized.sessionId) {
+      state.placementSessionId = normalized.sessionId;
+    }
+
+    if (normalized.finished) {
+      finishPlacement(normalized);
+      return;
+    }
+
+    renderPlacementQuestion(normalized);
+  } catch (error) {
+    console.error("Placement start error:", error);
+    window.alert(
+      `Could not start the placement test.\n\n${error.message}\n\nMake sure n8n is running and the webhook is listening.`
+    );
+  } finally {
+    loginSubmitButton.disabled = false;
+    loginSubmitButton.textContent = originalButtonText;
+  }
 }
-.login-right-inner { position: relative; z-index: 2; max-width: 560px; }
 
-.hero-chip {
-  display: inline-flex; align-items: center;
-  padding: 9px 20px; border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #fff; font-size: 15px; font-weight: 600;
-  backdrop-filter: blur(6px);
+function normalizePlacementResponse(data) {
+  const parsedOutput =
+    tryParseJson(data.output);
+
+  const outputObject =
+    parsedOutput &&
+    typeof parsedOutput === "object" &&
+    !Array.isArray(parsedOutput)
+      ? parsedOutput
+      : {};
+
+  const roadmap =
+    data.roadmap &&
+    typeof data.roadmap === "object"
+      ? data.roadmap
+      : outputObject.roadmap &&
+        typeof outputObject.roadmap === "object"
+        ? outputObject.roadmap
+        : {};
+
+  const returnedPlacementState =
+    firstDefined(
+      data.placementState,
+      data.placement_state,
+
+      outputObject.placementState,
+      outputObject.placement_state,
+
+      null
+    );
+
+  return {
+    raw: data,
+
+    finished: toBoolean(
+      firstDefined(
+        data.finished,
+        data.is_finished,
+        data.done,
+
+        outputObject.finished,
+        outputObject.is_finished,
+        outputObject.done,
+
+        false
+      )
+    ),
+
+    sessionId: String(
+      firstDefined(
+        data.sessionId,
+        data.session_id,
+        data.placement_session_id,
+
+        outputObject.sessionId,
+        outputObject.session_id,
+        outputObject.placement_session_id,
+
+        state.placementSessionId,
+        ""
+      )
+    ),
+
+    questionId: firstDefined(
+      data.questionId,
+      data.question_id,
+      data.id,
+
+      outputObject.questionId,
+      outputObject.question_id,
+      outputObject.id,
+
+      ""
+    ),
+
+    questionNumber: toNumber(
+      firstDefined(
+        data.questionNumber,
+        data.question_number,
+        data.currentQuestionNumber,
+        data.current_question_number,
+
+        outputObject.questionNumber,
+        outputObject.question_number,
+        outputObject.currentQuestionNumber,
+        outputObject.current_question_number,
+
+        1
+      ),
+      1
+    ),
+
+    totalQuestions: toNumber(
+      firstDefined(
+        data.totalQuestions,
+        data.total_questions,
+
+        outputObject.totalQuestions,
+        outputObject.total_questions,
+
+        20
+      ),
+      20
+    ),
+
+    question: String(
+      firstDefined(
+        data.question,
+        data.question_text,
+        data.text,
+
+        outputObject.question,
+        outputObject.question_text,
+        outputObject.text,
+
+        ""
+      )
+    ),
+
+    options: parseOptions(
+      firstDefined(
+        data.options,
+        data.choices,
+        data.answers,
+
+        outputObject.options,
+        outputObject.choices,
+        outputObject.answers,
+
+        []
+      )
+    ),
+
+    level: toNumber(
+      firstDefined(
+        data.level,
+        data.placementLevel,
+        data.placement_level,
+        data.detected_level,
+
+        outputObject.level,
+        outputObject.placementLevel,
+        outputObject.placement_level,
+        outputObject.detected_level,
+
+        roadmap.startingLevel,
+        roadmap.starting_level,
+
+        1
+      ),
+      1
+    ),
+
+    score: toNumber(
+      firstDefined(
+        data.score,
+        outputObject.score,
+        0
+      ),
+      0
+    ),
+
+    interfaceLanguage: normalizeInterfaceLanguage(
+      firstDefined(
+        data.interfaceLanguage,
+        data.interface_language,
+        data.test_language,
+
+        outputObject.interfaceLanguage,
+        outputObject.interface_language,
+        outputObject.test_language,
+
+        state.testLanguage,
+        "MSA"
+      )
+    ),
+
+    preferredLanguage: normalizeInterfaceLanguage(
+      firstDefined(
+        data.preferred_language,
+        data.preferredLanguage,
+
+        outputObject.preferred_language,
+        outputObject.preferredLanguage,
+
+        data.interface_language,
+        outputObject.interface_language,
+
+        state.testLanguage,
+        state.user.preferredLanguage,
+        "MSA"
+      )
+    ),
+
+    roadmap,
+
+    /*
+      هذه أهم إضافة:
+      نخزن حالة الاختبار التي أعادها n8n
+      حتى نعيد إرسالها مع الإجابة التالية.
+    */
+    placementState:
+      returnedPlacementState,
+  };
+  
 }
-.hero-chip-top { margin-bottom: 34px; }
 
-.hero-title { color: #fff; font-size: clamp(36px, 4vw, 52px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.08; margin-bottom: 18px; }
-.hero-sub { color: rgba(255, 255, 255, 0.85); font-size: 17px; margin-bottom: 34px; }
-.hero-chips { display: flex; flex-wrap: wrap; gap: 12px; }
+function renderPlacementQuestion(questionData) {
+  if (questionData.preferredLanguage) {
+    state.user.preferredLanguage =
+      normalizeInterfaceLanguage(
+        questionData.preferredLanguage
+      );
+  }
 
-.hero-orb { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.5; }
-.hero-orb-a { width: 420px; height: 420px; background: #34d399; top: -140px; right: -120px; }
-.hero-orb-b { width: 360px; height: 360px; background: #065f46; bottom: -140px; left: -100px; }
+  if (!questionData.question) {
+    throw new Error(
+      "n8n did not return a question. Expected a field named question."
+    );
+  }
+
+  if (!questionData.options.length) {
+    throw new Error(
+      "n8n did not return answer options. Expected a field named options."
+    );
+  }
+
+  placementState.selectedAnswer = null;
+  placementState.currentQuestion = questionData;
+
+  showScreen("test");
+
+  const questionNumber = Math.max(1, questionData.questionNumber);
+  const totalQuestions = Math.max(questionNumber, questionData.totalQuestions);
+  const progress = Math.min(
+    100,
+    Math.max(0, ((questionNumber - 1) / totalQuestions) * 100)
+  );
+
+  elTestFill.style.width = `${progress}%`;
+ const arabicTest =
+  isArabicPlacementTest();
+
+elTestEyebrow.textContent =
+  arabicTest
+    ? "اختبار تحديد المستوى"
+    : "Placement test";
+
+elTestLabel.textContent =
+  arabicTest
+   ? `السؤال ${questionNumber}`
+: `Question ${questionNumber}`;
+
+elTestQuestion.textContent =
+  questionData.question;
+
+elTestQuestion.dir =
+  arabicTest ? "rtl" : "ltr";
+
+elTestOptions.dir =
+  arabicTest ? "rtl" : "ltr";
+  elTestOptions.innerHTML = "";
+
+  btnTestNext.disabled = true;
+btnTestNext.textContent =
+  arabicTest
+    ? "التالي"
+    : "Next";  btnTestBack.style.visibility = "hidden";
+
+  questionData.options.forEach((option) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "option";
+    button.textContent = option.label;
+    button.setAttribute("dir", "auto");
+
+    button.addEventListener("click", () => {
+      elTestOptions
+        .querySelectorAll(".option")
+        .forEach((item) => item.classList.remove("selected"));
+
+      button.classList.add("selected");
+      placementState.selectedAnswer = option;
+      btnTestNext.disabled = false;
+    });
+
+    elTestOptions.appendChild(button);
+  });
+
+  elTestCard.classList.remove("slide");
+  void elTestCard.offsetWidth;
+  elTestCard.classList.add("slide");
+}
+
+btnTestNext.addEventListener("click", () => {
+  if (!placementState.selectedAnswer) return;
+  submitPlacementAnswer(placementState.selectedAnswer);
+});
+
+async function submitPlacementAnswer(
+  selectedOption
+) {
+  const currentQuestion =
+    placementState.currentQuestion;
+
+  if (!currentQuestion) {
+    return;
+  }
+
+  /*
+    الحالة التي رجعتها Adaptive Placement Engine
+    مع السؤال الحالي.
+  */
+  
+
+  btnTestNext.disabled = true;
+
+  btnTestNext.textContent =
+    isArabicPlacementTest()
+      ? "جاري التحقق..."
+      : "Checking...";
+
+  elTestOptions
+    .querySelectorAll(".option")
+    .forEach((button) => {
+      button.disabled = true;
+    });
+
+  try {
+    const data = await postToN8n({
+      mode: "placement",
+      action: "answer",
+
+      user_id:
+        state.user.id,
+
+      session_id:
+        state.placementSessionId,
+
+      placement_session_id:
+        state.placementSessionId,
+
+      email:
+        state.user.email,
+
+      test_language:
+        state.testLanguage,
+
+      question_id:
+        currentQuestion.questionId,
+
+      question_number:
+        currentQuestion.questionNumber,
+
+      question:
+        currentQuestion.question,
+
+      answer:
+        selectedOption.value,
+
+      selected_option:
+        selectedOption.value,
+
+      selected_option_label:
+        selectedOption.label,
+
+      /*
+        هذه أهم إضافة:
+        نعيد حالة الاختبار كاملة إلى n8n.
+      */
+     
+    });
+
+    const normalized =
+      normalizePlacementResponse(data);
+
+    state.user.preferredLanguage =
+      normalizeInterfaceLanguage(
+        normalized.preferredLanguage
+      );
+
+    if (normalized.sessionId) {
+      state.placementSessionId =
+        normalized.sessionId;
+    }
+
+    if (normalized.finished) {
+      finishPlacement(normalized);
+      return;
+    }
+
+    /*
+      فحص واضح قبل محاولة عرض السؤال.
+    */
+    if (!normalized.question) {
+      throw new Error(
+        isArabicPlacementTest()
+          ? "لم يُرجع n8n نص السؤال التالي."
+          : "n8n did not return the next question."
+      );
+    }
+
+    if (!normalized.options.length) {
+      throw new Error(
+        isArabicPlacementTest()
+          ? "لم يُرجع n8n خيارات السؤال التالي."
+          : "n8n did not return answer options."
+      );
+    }
+
+    
+
+    renderPlacementQuestion(
+      normalized
+    );
+  } catch (error) {
+    console.error(
+      "Placement answer error:",
+      error
+    );
+
+    window.alert(
+      isArabicPlacementTest()
+        ? `تعذر إرسال الإجابة.\n\n${error.message}`
+        : `Could not submit your answer.\n\n${error.message}`
+    );
+
+    btnTestNext.textContent =
+      isArabicPlacementTest()
+        ? "التالي"
+        : "Next";
+
+    btnTestNext.disabled = false;
+
+    elTestOptions
+      .querySelectorAll(".option")
+      .forEach((button) => {
+        button.disabled = false;
+      });
+  }
+}
+
+function finishPlacement(result) {
+  state.user.preferredLanguage =
+    normalizeInterfaceLanguage(
+      result.preferredLanguage ??
+      result.raw?.preferred_language ??
+      result.raw?.preferredLanguage ??
+      state.user.preferredLanguage
+    );
+
+  state.placementLevel =
+    Math.max(1, result.level || 1);
+
+  const roadmap = result.roadmap || {};
+  state.wordsCompleted = Math.max(
+    0,
+    toNumber(
+      firstDefined(
+        roadmap.wordsCompleted,
+        roadmap.words_completed,
+        result.raw.wordsCompleted,
+        result.raw.words_completed
+      ),
+      0
+    )
+  );
+
+  state.wordsTotal = Math.max(
+    state.wordsCompleted,
+    toNumber(
+      firstDefined(
+        roadmap.wordsTotal,
+        roadmap.words_total,
+        result.raw.wordsTotal,
+        result.raw.words_total
+      ),
+      0
+    )
+  );
+
+  elTestFill.style.width = "100%";
+updateProgressUI();
+
+savePersistentLogin();
+
+startPreparingScreen();
+}
 
 /* ============================================================
-   2 · PLACEMENT TEST
+   5 · PREPARING SCREEN
 ============================================================ */
-#screen-test { background: var(--bg-soft); }
-.test-layout { max-width: 860px; margin: 0 auto; padding: 44px 24px 80px; }
-.test-top .brand { margin-bottom: 26px; }
+const PREP_STEPS = [
+  "Analyzing your placement results…",
+  "Selecting Levantine words for your level…",
+  "Building your lesson plan…",
+  "Almost ready…",
+];
 
-.test-progress-track { height: 8px; border-radius: 999px; background: var(--emerald-100); overflow: hidden; }
-.test-progress-fill {
-  height: 100%; width: 0%; border-radius: 999px;
-  background: linear-gradient(90deg, var(--emerald-500), var(--emerald-600));
-  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.test-progress-label { margin-top: 10px; font-size: 13.5px; font-weight: 600; color: var(--ink-500); }
+function startPreparingScreen() {
+  document.getElementById(
+    "prep-badge"
+  ).textContent = `Level ${state.placementLevel} detected`;
 
-.test-card {
-  margin-top: 32px; background: #fff; border-radius: 24px;
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-card); padding: 40px 44px 34px;
-}
-.test-card.slide { animation: slideQ 0.35s ease both; }
-@keyframes slideQ {
-  from { opacity: 0; transform: translateX(18px); }
-  to   { opacity: 1; transform: none; }
-}
+  const fill = document.getElementById("prep-bar-fill");
+  const stepElement = document.getElementById("prep-step");
 
-.test-question { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 26px; }
+  fill.style.width = "0%";
+  showScreen("preparing");
 
-.test-options { display: flex; flex-direction: column; gap: 14px; }
-.option {
-  display: flex; align-items: center; gap: 14px;
-  width: 100%; text-align: left; cursor: pointer;
-  font-family: inherit; font-size: 16.5px; font-weight: 500; color: var(--ink-900);
-  background: #fff; border: 1.5px solid var(--line); border-radius: var(--radius-md);
-  padding: 17px 20px;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
-}
-.option:hover { border-color: var(--emerald-400); background: var(--emerald-50); }
-.option .radio {
-  flex: none; width: 20px; height: 20px; border-radius: 50%;
-  border: 2px solid var(--ink-400); position: relative;
-  transition: border-color 0.15s ease;
-}
-.option.selected { border-color: var(--emerald-500); background: var(--emerald-50); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.10); }
-.option.selected .radio { border-color: var(--emerald-600); }
-.option.selected .radio::after {
-  content: ""; position: absolute; inset: 3px; border-radius: 50%;
-  background: var(--emerald-600);
-}
-.option [dir="rtl"] { font-size: 18px; }
+  const marks = [12, 38, 64, 86, 100];
+  marks.forEach((width, index) => {
+    setTimeout(() => {
+      fill.style.width = `${width}%`;
+    }, 120 + index * 420);
+  });
 
-.test-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 30px; }
+  PREP_STEPS.forEach((text, index) => {
+    setTimeout(() => {
+      stepElement.classList.add("fade");
+      setTimeout(() => {
+        stepElement.textContent = text;
+        stepElement.classList.remove("fade");
+      }, 200);
+    }, index * 520);
+  });
+
+  setTimeout(enterDashboard, 2300);
+}
 
 /* ============================================================
-   3 · PREPARING PERSONALIZED LESSONS  (polished)
+   6 · MAIN DASHBOARD AND MODES
 ============================================================ */
-#screen-preparing {
-  position: relative; overflow: hidden;
-  background:
-    radial-gradient(900px 600px at 18% 12%, rgba(167, 243, 208, 0.35), transparent 60%),
-    radial-gradient(900px 620px at 84% 86%, rgba(221, 214, 254, 0.45), transparent 60%),
-    linear-gradient(180deg, #fbfdfc 0%, #f7f7fd 100%);
-}
-#screen-preparing.active { display: flex; align-items: center; justify-content: center; }
+const UI_TEXT = {
+  English: {
+    questionMode: "Question Mode",
+    learningMode: "Learning Mode",
 
-.prep-bg { position: absolute; inset: 0; pointer-events: none; }
-.prep-orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.45; animation: orbFloat 9s ease-in-out infinite alternate; }
-.prep-orb-green  { width: 460px; height: 460px; background: #a7f3d0; top: -160px; left: -120px; }
-.prep-orb-purple { width: 480px; height: 480px; background: #ddd6fe; bottom: -180px; right: -140px; animation-delay: -4s; }
-@keyframes orbFloat {
-  from { transform: translate(0, 0) scale(1); }
-  to   { transform: translate(30px, -24px) scale(1.06); }
+    questionGreeting:
+      "Hey! I'm Lehja — your Levantine Arabic tutor. Ask me how to say something, translate a phrase, or check whether a word is Levantine.",
+
+    questionPlaceholder:
+      "Ask anything about Levantine Arabic...",
+
+    questionChips: [
+      'How do I say "good morning" politely?',
+      'Is the word "بدي" Levantine?',
+      'How to say in Levantine:"See you tomorrow?"',
+    ],
+
+    learningChips: [
+      "Got it",
+      "I don't understand",
+      "Give me an example",
+    ],
+
+    currentLevel: "Current level",
+    wordsCompleted: "Words completed",
+    wordsRemaining: "Words remaining",
+    levelProgress: "Level progress",
+    levelWord: "Level",
+
+    composerHint:
+      "Lehja may make mistakes. Verify important phrases.",
+
+    noReply:
+      "No reply received from n8n.",
+
+    wordLabel: "Word",
+    meaningLabel: "Meaning",
+    pronunciationLabel: "Pronunciation",
+    exampleLabel: "Example",
+
+    learningStartError:
+      "Sorry, I could not start Learning Mode.",
+
+    connectionError:
+      "Sorry, I could not connect to the server.",
+  },
+
+  MSA: {
+    questionMode: "وضع الأسئلة",
+    learningMode: "وضع التعلّم",
+
+    questionGreeting:
+      "مرحبًا! أنا لهجة، معلّمك للغة العربية الشامية. اسألني كيف تقول عبارة، أو اطلب ترجمة، أو تحقّق إن كانت الكلمة شامية.",
+
+    questionPlaceholder:
+      "اسأل عن اللهجة الشامية...",
+
+    questionChips: [
+      'كيف أقول "صباح الخير" بطريقة مهذبة؟',
+      'هل كلمة "بدي" من اللهجة الشامية؟',
+      'ترجم: "أراك غدًا"',
+    ],
+
+    learningChips: [
+      "فهمت",
+      "لم أفهم",
+      "أعطني مثالًا",
+    ],
+
+    currentLevel: "المستوى الحالي",
+    wordsCompleted: "الكلمات المكتملة",
+    wordsRemaining: "الكلمات المتبقية",
+    levelProgress: "تقدّم المستوى",
+    levelWord: "المستوى",
+
+    composerHint:
+      "قد تُخطئ لهجة أحيانًا. تحقّق من العبارات المهمة.",
+
+    noReply:
+      "لم يصل رد من n8n.",
+
+    wordLabel: "الكلمة",
+    meaningLabel: "المعنى",
+    pronunciationLabel: "النطق",
+    exampleLabel: "مثال",
+
+    learningStartError:
+      "تعذّر بدء وضع التعلّم.",
+
+    connectionError:
+      "تعذّر الاتصال بالخادم.",
+  },
+};
+
+function getUIText() {
+  return state.user.preferredLanguage === "English"
+    ? UI_TEXT.English
+    : UI_TEXT.MSA;
 }
-.prep-grid {
-  position: absolute; inset: 0; opacity: 0.5;
-  background-image:
-    linear-gradient(rgba(15, 23, 42, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 23, 42, 0.025) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(closest-side at 50% 45%, #000 30%, transparent 100%);
-  -webkit-mask-image: radial-gradient(closest-side at 50% 45%, #000 30%, transparent 100%);
+function syncInterfaceLanguageFromServer(data) {
+  const returnedLanguage = firstDefined(
+    data?.preferred_language,
+    data?.preferredLanguage,
+    data?.interface_language,
+    data?.interfaceLanguage
+  );
+
+  if (returnedLanguage) {
+    state.user.preferredLanguage =
+      normalizeInterfaceLanguage(returnedLanguage);
+  }
+
+  // The learner's explicit English selection has priority.
+  if (state.testLanguage === "English") {
+    state.user.preferredLanguage = "English";
+  }
+
+  applyDashboardLanguage();
 }
 
-.prep-content {
-  position: relative; z-index: 2;
-  display: flex; flex-direction: column; align-items: center;
-  text-align: center; padding: 40px 24px; max-width: 640px;
-  animation: prepIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes prepIn {
-  from { opacity: 0; transform: translateY(16px) scale(0.98); }
-  to   { opacity: 1; transform: none; }
+function applyDashboardLanguage() {
+  const ui = getUIText();
+  const arabicUI = isArabicUI();
+
+  document.documentElement.lang =
+    arabicUI ? "ar" : "en";
+
+  modeBtnQuestion.textContent =
+    ui.questionMode;
+
+  modeBtnLearning.textContent =
+    ui.learningMode;
+
+  elInput.placeholder =
+    ui.questionPlaceholder;
+
+  elInput.dir =
+    arabicUI ? "rtl" : "ltr";
+
+  elChips.dir =
+    arabicUI ? "rtl" : "ltr";
+
+  const statLabels = [
+    ...document.querySelectorAll(
+      "#progress-card .stat-label"
+    ),
+  ];
+
+  const translatedLabels = [
+    ui.currentLevel,
+    ui.wordsCompleted,
+    ui.wordsRemaining,
+    ui.levelProgress,
+  ];
+
+  statLabels.forEach((label, index) => {
+    if (translatedLabels[index]) {
+      label.textContent =
+        translatedLabels[index];
+    }
+  });
+
+  const composerHint =
+    document.querySelector(
+      ".composer-hint"
+    );
+
+  if (composerHint) {
+    composerHint.textContent =
+      ui.composerHint;
+
+    composerHint.dir =
+      arabicUI ? "rtl" : "ltr";
+  }
+
+  const surveyLink =
+    document.getElementById(
+      "experience-survey-link"
+    );
+
+  if (surveyLink) {
+    surveyLink.textContent =
+      arabicUI
+        ? "استبيان تقييم التجربة"
+        : "Experience survey";
+
+    surveyLink.dir =
+      arabicUI ? "rtl" : "ltr";
+  }
 }
 
-/* Robot */
-.prep-bot-wrap { position: relative; margin-bottom: 34px; }
-.prep-bot {
-  position: relative; z-index: 2;
-  width: 92px; height: 92px; border-radius: 26px;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(160deg, #ffffff, #f0fdf7);
-  border: 1px solid rgba(16, 185, 129, 0.18);
-  box-shadow:
-    0 18px 40px rgba(5, 150, 105, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  animation: botBob 3.2s ease-in-out infinite;
-}
-@keyframes botBob {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50%      { transform: translateY(-8px) rotate(-1.5deg); }
-}
-.prep-bot-ring {
-  position: absolute; inset: -14px; border-radius: 34px; z-index: 1;
-  border: 1.5px dashed rgba(16, 185, 129, 0.35);
-  animation: ringSpin 14s linear infinite;
-}
-@keyframes ringSpin { to { transform: rotate(360deg); } }
+function enterDashboard() {
+  // Keep the dashboard interface consistent with the language
+  // selected by the learner for the placement test.
+  state.user.preferredLanguage =
+    normalizeInterfaceLanguage(
+      state.user.preferredLanguage ||
+      state.testLanguage
+    );
 
-.bot-eye { animation: blink 4.2s infinite; transform-origin: center; }
-@keyframes blink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  95%           { transform: scaleY(0.12); }
+  // If the learner explicitly selected English,
+  // never let the dashboard fall back to MSA.
+  if (state.testLanguage === "English") {
+    state.user.preferredLanguage = "English";
+  }
+
+  refreshProfileUI();
+  applyDashboardLanguage();
+  updateProgressUI();
+  showScreen("app");
+  setMode("question", true);
+  requestAnimationFrame(positionModePill);
+  addLogoutButton();
+savePersistentLogin();
 }
 
-.prep-spark { position: absolute; color: var(--emerald-400); font-size: 14px; animation: spark 2.6s ease-in-out infinite; }
-.prep-spark.s1 { top: -8px; right: -18px; }
-.prep-spark.s2 { bottom: 2px; left: -22px; animation-delay: -0.9s; color: #a78bfa; }
-.prep-spark.s3 { top: 30px; right: -30px; animation-delay: -1.7s; font-size: 10px; }
-@keyframes spark {
-  0%, 100% { opacity: 0; transform: scale(0.5); }
-  50%      { opacity: 1; transform: scale(1); }
+function positionModePill() {
+  const activeButton =
+    state.mode === "question"
+      ? modeBtnQuestion
+      : modeBtnLearning;
+
+  modePill.style.left =
+    `${activeButton.offsetLeft}px`;
+
+  modePill.style.width =
+    `${activeButton.offsetWidth}px`;
 }
 
-.prep-badge {
-  display: inline-flex; padding: 7px 16px; border-radius: 999px;
-  background: rgba(16, 185, 129, 0.10); border: 1px solid rgba(16, 185, 129, 0.25);
-  color: var(--emerald-600); font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
-  margin-bottom: 20px;
+window.addEventListener("resize", () => {
+  if (
+    screens.app.classList.contains("active")
+  ) {
+    positionModePill();
+  }
+});
+
+modeBtnQuestion.addEventListener(
+  "click",
+  () => setMode("question")
+);
+
+modeBtnLearning.addEventListener(
+  "click",
+  () => setMode("learning")
+);
+
+function setMode(mode, force = false) {
+  if (!force && state.mode === mode) {
+    return;
+  }
+
+  state.mode = mode;
+savePersistentLogin();
+  const ui = getUIText();
+  const arabicUI = isArabicUI();
+
+  applyDashboardLanguage();
+
+  modeBtnQuestion.classList.toggle(
+    "active",
+    mode === "question"
+  );
+
+  modeBtnLearning.classList.toggle(
+    "active",
+    mode === "learning"
+  );
+
+  modeBtnQuestion.setAttribute(
+    "aria-selected",
+    String(mode === "question")
+  );
+
+  modeBtnLearning.setAttribute(
+    "aria-selected",
+    String(mode === "learning")
+  );
+
+  elProgressCard.hidden =
+    mode !== "learning";
+
+  clearChat();
+  positionModePill();
+
+  elMessages.dir =
+    arabicUI ? "rtl" : "ltr";
+
+  if (mode === "question") {
+    renderChips(
+      ui.questionChips
+    );
+
+    addAIMessage(
+      ui.questionGreeting
+    );
+  } else {
+    renderChips(
+      ui.learningChips
+    );
+
+    void startLearningModeFromServer();
+  }
 }
 
-.prep-title {
-  font-size: clamp(26px, 3.4vw, 36px); font-weight: 800;
-  letter-spacing: -0.025em; line-height: 1.2; margin-bottom: 14px;
+function clearChat() {
+  elMessages.innerHTML = "";
 }
-.prep-ellipsis span { animation: dotPulse 1.4s infinite; display: inline-block; }
-.prep-ellipsis span:nth-child(2) { animation-delay: 0.2s; }
-.prep-ellipsis span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes dotPulse { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
 
-.prep-sub { color: var(--ink-500); font-size: 16px; margin-bottom: 38px; max-width: 460px; }
+function renderChips(chips) {
+  elChips.innerHTML = "";
 
-.prep-bar-track {
-  width: min(380px, 82vw); height: 10px; border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06); overflow: hidden;
-  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06);
-}
-.prep-bar-fill {
-  position: relative; height: 100%; width: 0%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #34d399, #059669 60%, #8b5cf6 140%);
-  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.prep-bar-shine {
-  position: absolute; inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
-  transform: translateX(-100%);
-  animation: shine 1.4s ease-in-out infinite;
-}
-@keyframes shine { to { transform: translateX(100%); } }
+  chips.forEach((text) => {
+    const button =
+      document.createElement(
+        "button"
+      );
 
-.prep-step { margin-top: 20px; font-size: 14px; font-weight: 600; color: var(--ink-400); min-height: 20px; transition: opacity 0.25s ease; }
-.prep-step.fade { opacity: 0; }
+    button.type =
+      "button";
+
+    button.className =
+      "prompt-chip";
+
+    button.textContent =
+      text;
+
+    button.addEventListener(
+      "click",
+      () =>
+        sendUserMessage(text)
+    );
+
+    elChips.appendChild(
+      button
+    );
+  });
+}
 
 /* ============================================================
-   4 · MAIN CHAT DASHBOARD
+   7 · MESSAGE RENDERING
 ============================================================ */
-#screen-app.active { display: flex; flex-direction: column; height: 100vh; }
+function makeMessage(role, text) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `msg ${role}`;
 
-.app-header {
-  flex: none;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 12px 24px;
-  background: #fff; border-bottom: 1px solid var(--line);
-  position: relative; z-index: 30;
-}
+  const avatar = document.createElement("span");
+  avatar.className = "msg-avatar";
+  avatar.textContent = role === "ai" ? "AI" : initials(state.user.name);
 
-/* Mode toggle */
-.mode-toggle {
-  position: relative; display: flex; align-items: center;
-  background: var(--bg-soft); border: 1px solid var(--line);
-  border-radius: 999px; padding: 4px;
-}
-.mode-btn {
-  position: relative; z-index: 2;
-  border: none; background: transparent; cursor: pointer;
-  font-family: inherit; font-size: 14.5px; font-weight: 600; color: var(--ink-500);
-  padding: 9px 22px; border-radius: 999px;
-  transition: color 0.2s ease;
-}
-.mode-btn.active { color: var(--emerald-600); font-weight: 700; }
-.mode-pill {
-  position: absolute; top: 4px; bottom: 4px; z-index: 1;
-  border-radius: 999px; background: #fff;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.10);
-  transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1), width 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  const bubble = document.createElement("div");
+  bubble.className = "msg-bubble";
+  bubble.setAttribute("dir", "auto");
+  bubble.textContent = text;
+
+  wrapper.append(avatar, bubble);
+  return { wrapper, bubble };
 }
 
-/* Profile */
-.profile-area { position: relative; }
-.profile-btn {
-  display: flex; align-items: center; gap: 11px;
-  border: 1px solid transparent; background: transparent; cursor: pointer;
-  font-family: inherit; padding: 6px 10px; border-radius: var(--radius-md);
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.profile-btn:hover { background: var(--bg-soft); border-color: var(--line); }
+function addAIMessage(text, extraBuilder) {
+  const { wrapper, bubble } = makeMessage("ai", text);
 
-.avatar {
-  flex: none; width: 40px; height: 40px; border-radius: 50%;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--emerald-500), var(--emerald-600));
-  color: #fff; font-weight: 800; font-size: 14px; letter-spacing: 0.02em;
-}
-.profile-meta { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25; }
-.profile-name { font-size: 14.5px; font-weight: 700; color: var(--ink-900); }
-.profile-email { font-size: 12.5px; color: var(--ink-500); }
-.profile-caret { color: var(--ink-400); transition: transform 0.2s ease; }
-.profile-btn[aria-expanded="true"] .profile-caret { transform: rotate(180deg); }
+  if (typeof extraBuilder === "function") {
+    extraBuilder(bubble);
+  }
 
-.profile-dropdown {
-  position: absolute; top: calc(100% + 10px); right: 0;
-  width: 300px; background: #fff; border: 1px solid var(--line);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
-  padding: 20px; z-index: 50;
-  animation: dropIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes dropIn {
-  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
-  to   { opacity: 1; transform: none; }
-}
-.dropdown-title { font-size: 15px; font-weight: 800; margin-bottom: 16px; }
-.field-sm { margin-bottom: 13px; }
-.field-sm input { padding: 10px 13px; font-size: 14px; border-radius: var(--radius-sm); }
-.save-confirm { margin-top: 10px; text-align: center; font-size: 13px; font-weight: 700; color: var(--emerald-600); }
-
-/* Chat shell */
-.chat-shell {
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column;
-  width: 100%; max-width: 900px; margin: 0 auto;
-  padding: 0 20px;
+  elMessages.appendChild(wrapper);
+  scrollChat();
+  return bubble;
 }
 
-/* Learning progress card */
-.progress-card {
-  flex: none; margin-top: 18px;
-  background: linear-gradient(135deg, #f0fdf7, #fbfefd 60%);
-  border: 1px solid rgba(16, 185, 129, 0.22);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-soft);
-  padding: 18px 22px 16px;
-  animation: dropIn 0.3s ease both;
-}
-.progress-card-stats {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-  margin-bottom: 13px;
-}
-.stat { display: flex; flex-direction: column; gap: 4px; }
-.stat-label { font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-400); }
-.stat-value { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
-.stat-value.accent { color: var(--emerald-600); }
-.progress-card-bar { height: 8px; border-radius: 999px; background: rgba(15, 23, 42, 0.07); overflow: hidden; }
-.progress-card-fill {
-  height: 100%; border-radius: 999px;
-  background: linear-gradient(90deg, var(--emerald-400), var(--emerald-600));
-  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+function addUserMessage(text) {
+  const { wrapper } = makeMessage("user", text);
+  elMessages.appendChild(wrapper);
+  scrollChat();
 }
 
-/* Messages */
-.chat-messages {
-  flex: 1; min-height: 0; overflow-y: auto;
-  padding: 24px 4px 12px;
-  display: flex; flex-direction: column; gap: 18px;
-  scroll-behavior: smooth;
+function addTyping() {
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg ai";
+  wrapper.innerHTML =
+    '<span class="msg-avatar">AI</span><div class="msg-bubble"><span class="typing"><i></i><i></i><i></i></span></div>';
+
+  elMessages.appendChild(wrapper);
+  scrollChat();
+  return wrapper;
 }
 
-.msg { display: flex; gap: 12px; max-width: 78%; animation: msgIn 0.3s ease both; }
-@keyframes msgIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: none; }
-}
-.msg.ai   { align-self: flex-start; }
-.msg.user { align-self: flex-end; flex-direction: row-reverse; }
-
-.msg-avatar {
-  flex: none; width: 34px; height: 34px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 800; color: #fff;
-}
-.msg.ai .msg-avatar   { background: linear-gradient(135deg, var(--emerald-500), var(--emerald-600)); }
-.msg.user .msg-avatar { background: var(--ink-700); }
-
-.msg-bubble {
-  padding: 14px 18px; font-size: 15.5px; line-height: 1.65;
-  border-radius: 18px; white-space: pre-line;
-  unicode-bidi: plaintext;
-}
-.msg.ai .msg-bubble {
-  background: #fff; border: 1px solid var(--line);
-  border-top-left-radius: 6px;
-  box-shadow: var(--shadow-soft);
-}
-.msg.user .msg-bubble {
-  background: linear-gradient(135deg, var(--emerald-500), var(--emerald-600));
-  color: #fff; border-top-right-radius: 6px;
-  box-shadow: 0 8px 20px rgba(5, 150, 105, 0.22);
+function scrollChat() {
+  elMessages.scrollTop = elMessages.scrollHeight;
 }
 
-/* Typing indicator */
-.typing { display: inline-flex; gap: 5px; padding: 6px 2px; }
-.typing i {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--ink-400);
-  animation: typingDot 1.1s infinite ease-in-out;
-}
-.typing i:nth-child(2) { animation-delay: 0.15s; }
-.typing i:nth-child(3) { animation-delay: 0.3s; }
-@keyframes typingDot {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30%           { transform: translateY(-5px); opacity: 1; }
+function extractReply(data) {
+  const output = tryParseJson(data.output);
+
+  if (typeof output === "string" && output.trim()) {
+    return output.trim();
+  }
+
+  if (output && typeof output === "object") {
+    const nestedReply = firstDefined(
+      output.reply,
+      output.message,
+      output.answer,
+      output.text,
+      output.content
+    );
+    if (nestedReply) return String(nestedReply);
+  }
+
+  const directReply = firstDefined(
+    data.reply,
+    data.response,
+    data.answer,
+    data.message,
+    data.text,
+    data.content
+  );
+
+  if (directReply && typeof directReply !== "object") {
+    return String(directReply);
+  }
+
+  // Optional structured learning response from n8n.
+  const word = firstDefined(
+    data.word,
+    data.levantine,
+    data.levantine_word
+  );
+
+  if (word) {
+    const ui = getUIText();
+
+    const parts = [
+      `${ui.wordLabel}: ${word}`,
+    ];
+
+    const meaning = firstDefined(
+      data.meaning,
+      data.english,
+      data.translation
+    );
+
+    const pronunciation = firstDefined(
+      data.pronunciation,
+      data.pron
+    );
+
+    const example = firstDefined(
+      data.example,
+      data.example_sentence
+    );
+
+    if (meaning) {
+      parts.push(
+        `${ui.meaningLabel}: ${meaning}`
+      );
+    }
+
+    if (pronunciation) {
+      parts.push(
+        `${ui.pronunciationLabel}: ${pronunciation}`
+      );
+    }
+
+    if (example) {
+      parts.push(
+        `${ui.exampleLabel}: ${example}`
+      );
+    }
+
+    return parts.join("\n");
+  }
+
+  return getUIText().noReply;
 }
 
-/* Quiz answer chips inside chat */
-.quiz-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.quiz-opt {
-  border: 1.5px solid var(--line); background: #fff; cursor: pointer;
-  font-family: inherit; font-size: 14px; font-weight: 700; color: var(--ink-700);
-  padding: 8px 16px; border-radius: 999px;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-.quiz-opt:hover:not(:disabled) { border-color: var(--emerald-500); background: var(--emerald-50); color: var(--emerald-600); }
-.quiz-opt:disabled { opacity: 0.5; cursor: default; }
+function renderServerReply(data) {
+  const suggestedActions =
+    Array.isArray(data.suggested_actions)
+      ? data.suggested_actions
+      : [];
 
-/* Composer */
-.composer-area { flex: none; padding: 10px 0 14px; }
-.prompt-chips { display: flex; flex-wrap: wrap; gap: 9px; justify-content: center; margin-bottom: 12px; }
-.prompt-chip {
-  border: 1px solid var(--line); background: #fff; cursor: pointer;
-  font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--ink-700);
-  padding: 9px 16px; border-radius: 999px;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
-  unicode-bidi: plaintext;
-}
-.prompt-chip:hover { border-color: var(--emerald-400); background: var(--emerald-50); transform: translateY(-1px); }
+  /*
+    دائمًا حدّث الـchips.
+    إذا القائمة فاضية، بتنمسح الأزرار القديمة.
+  */
+  renderChips(suggestedActions);
 
-.composer {
-  display: flex; align-items: center; gap: 10px;
-  background: #fff; border: 1.5px solid var(--line);
-  border-radius: 999px; padding: 8px 8px 8px 22px;
-  box-shadow: var(--shadow-soft);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.composer:focus-within { border-color: var(--emerald-500); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.10); }
-.composer input {
-  flex: 1; border: none; outline: none; background: transparent;
-  font-family: inherit; font-size: 15.5px; color: var(--ink-900);
-  unicode-bidi: plaintext;
-}
-.composer input::placeholder { color: var(--ink-400); }
-.send-btn {
-  flex: none; width: 44px; height: 44px; border-radius: 50%;
-  border: none; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--emerald-500), var(--emerald-600));
-  box-shadow: 0 6px 14px rgba(5, 150, 105, 0.3);
-  transition: transform 0.12s ease;
-}
-.send-btn:hover { transform: scale(1.06); }
-.send-btn:active { transform: scale(0.97); }
-.send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  const reply =
+    extractReply(data);
 
-.composer-hint { text-align: center; margin-top: 9px; font-size: 12.5px; color: var(--ink-400); }
+  const options =
+    parseOptions(
+      firstDefined(
+        data.options,
+        data.choices,
+        data.quiz_options,
+        []
+      )
+    );
+
+  const postTestCompleted =
+    data.action ===
+      "post_test_completed" ||
+    data.post_test_finished === true;
+
+  const preferredLanguage =
+    String(
+      data.preferred_language || "MSA"
+    ).toLowerCase();
+
+  addAIMessage(reply, (bubble) => {
+    if (options.length) {
+      const optionsWrapper =
+        document.createElement("div");
+
+      optionsWrapper.className =
+        "quiz-options";
+
+      options.forEach((option) => {
+        const button =
+          document.createElement("button");
+
+        button.type =
+          "button";
+
+        button.className =
+          "quiz-opt";
+
+        button.textContent =
+          option.label;
+
+        button.setAttribute(
+          "dir",
+          "auto"
+        );
+
+        button.addEventListener(
+          "click",
+          () => {
+            optionsWrapper
+              .querySelectorAll(
+                ".quiz-opt"
+              )
+              .forEach(
+                (item) =>
+                  (item.disabled = true)
+              );
+
+            sendUserMessage(
+              option.value
+            );
+          }
+        );
+
+        optionsWrapper.appendChild(
+          button
+        );
+      });
+
+      bubble.appendChild(
+        optionsWrapper
+      );
+    }
+
+    /*
+      بعد انتهاء الـPost-test فقط:
+      نظهر زر الاستبيان.
+  */
+    if (postTestCompleted) {
+      const surveyButton =
+        document.createElement(
+          "button"
+        );
+
+      surveyButton.type =
+        "button";
+
+      surveyButton.className =
+        "quiz-opt";
+
+      surveyButton.textContent =
+        preferredLanguage === "english"
+          ? "Take the survey"
+          : "املأ الاستبيان";
+
+      surveyButton.addEventListener(
+        "click",
+        () => {
+          window.open(
+            "https://docs.google.com/forms/d/e/1FAIpQLScWG2wX6wkCUz5MediGguxrea1z5PYJ3EJrRq_ozFnGEJ6vng/viewform",
+            "_blank",
+            "noopener,noreferrer"
+          );
+        }
+      );
+
+      bubble.appendChild(
+        surveyButton
+      );
+    }
+  });
+}
 
 /* ============================================================
-   Responsive
+   8 · QUESTION MODE AND LEARNING MODE → n8n
 ============================================================ */
-@media (max-width: 960px) {
-  .login-layout { grid-template-columns: 1fr; }
-  .login-right { min-height: 46vh; padding: 44px 28px; order: -1; }
-  .login-left { padding: 40px 24px 60px; }
-  .progress-card-stats { grid-template-columns: repeat(2, 1fr); }
+composer.addEventListener("submit", (event) => {
+  event.preventDefault();
+
+  const text = elInput.value.trim();
+  if (!text || state.isSendingMessage) return;
+
+  elInput.value = "";
+  sendUserMessage(text);
+});
+
+async function startLearningModeFromServer() {
+  const typing = addTyping();
+
+  try {
+    const data = await postToN8n({
+      mode: "learning",
+      action: "start",
+      user_id: state.user.id,
+      session_id: state.sessionId,
+      email: state.user.email,
+      current_level: state.placementLevel,
+      placement_level: state.placementLevel,
+      preferred_language:
+        state.user.preferredLanguage,
+      interface_language:
+        state.user.preferredLanguage,
+    });
+
+    typing.remove();
+
+syncInterfaceLanguageFromServer(data);
+updateProgressFromServer(data);
+renderServerReply(data);
+  } catch (error) {
+    typing.remove();
+    console.error("Learning start error:", error);
+    addAIMessage(
+      `${getUIText().learningStartError}\n${error.message}`
+    );
+  }
 }
 
-@media (max-width: 640px) {
-  .test-card { padding: 28px 22px; }
-  .test-question { font-size: 22px; }
-  .profile-meta { display: none; }
-  .mode-btn { padding: 8px 14px; font-size: 13px; }
-  .app-header { padding: 10px 14px; }
-  .brand-name { display: none; }
-  .msg { max-width: 92%; }
-  .progress-card-stats { grid-template-columns: repeat(2, 1fr); }
-  .prompt-chips { display: none; }
-  .profile-dropdown { right: -8px; width: calc(100vw - 32px); max-width: 320px; }
+async function sendUserMessage(text) {
+  if (state.isSendingMessage) return;
+
+  state.isSendingMessage = true;
+  composerSubmitButton.disabled = true;
+  elInput.disabled = true;
+
+  addUserMessage(text);
+  const typing = addTyping();
+
+  try {
+    const data = await postToN8n({
+  mode: state.mode,
+  action: "message",
+
+  user_id:
+    state.user.id,
+
+  session_id:
+    state.sessionId,
+
+  email:
+    state.user.email,
+
+  message:
+    text,
+
+  current_level:
+    state.placementLevel,
+
+  placement_level:
+    state.placementLevel,
+
+  preferred_language:
+    state.user.preferredLanguage,
+
+  interface_language:
+    state.user.preferredLanguage,
+
+    });
+
+    typing.remove();
+
+syncInterfaceLanguageFromServer(data);
+updateProgressFromServer(data);
+renderServerReply(data);
+  } catch (error) {
+    typing.remove();
+    console.error("n8n connection error:", error);
+    addAIMessage(
+      `${getUIText().connectionError}\n${error.message}`
+    );
+  } finally {
+    state.isSendingMessage = false;
+    composerSubmitButton.disabled = false;
+    elInput.disabled = false;
+    elInput.focus();
+  }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
+/* ============================================================
+   9 · LEARNING PROGRESS
+============================================================ */
+function updateProgressFromServer(data) {
+  const roadmap =
+    data.roadmap && typeof data.roadmap === "object" ? data.roadmap : {};
+
+  const returnedLevel = toNumber(
+    firstDefined(
+      data.current_level,
+      data.currentLevel,
+      data.level,
+      roadmap.current_level,
+      roadmap.currentLevel,
+      roadmap.starting_level,
+      roadmap.startingLevel
+    )
+  );
+
+  const returnedMicroLevel = toNumber(
+    firstDefined(
+      data.current_micro_level,
+      data.currentMicroLevel,
+      data.response?.current_micro_level,
+      data.response?.currentMicroLevel,
+      data.session_row?.current_micro_level,
+      data.session_row?.currentMicroLevel
+    )
+  );
+
+  const returnedCompleted = toNumber(
+    firstDefined(
+      data.words_completed,
+      data.wordsCompleted,
+      data.completed_words,
+      roadmap.words_completed,
+      roadmap.wordsCompleted
+    )
+  );
+
+  const returnedTotal = toNumber(
+    firstDefined(
+      data.words_total,
+      data.wordsTotal,
+      data.total_words,
+      roadmap.words_total,
+      roadmap.wordsTotal
+    )
+  );
+
+  const returnedRemaining = toNumber(
+    firstDefined(
+      data.words_remaining,
+      data.wordsRemaining,
+      data.remaining_words,
+      roadmap.words_remaining,
+      roadmap.wordsRemaining
+    )
+  );
+
+  if (returnedLevel !== null) {
+    state.placementLevel = Math.max(1, returnedLevel);
+  }
+
+  if (returnedMicroLevel !== null) {
+    state.currentMicroLevel =
+      Math.max(1, returnedMicroLevel);
+  }
+
+  if (returnedCompleted !== null) {
+    state.wordsCompleted = Math.max(0, returnedCompleted);
+  }
+
+  if (returnedTotal !== null) {
+    state.wordsTotal = Math.max(state.wordsCompleted, returnedTotal);
+  } else if (returnedRemaining !== null) {
+    state.wordsTotal = state.wordsCompleted + Math.max(0, returnedRemaining);
+  }
+
+  updateProgressUI();
+
+savePersistentLogin();
 }
+
+function getLevelDisplayName(level) {
+  const numericLevel =
+    Math.max(1, Number(level) || 1);
+
+  const names = isArabicUI()
+    ? {
+        1: "مبتدئ",
+        2: "متوسط",
+        3: "متقدم",
+        4: "خبير",
+      }
+    : {
+        1: "Beginner",
+        2: "Intermediate",
+        3: "Advanced",
+        4: "Expert",
+      };
+
+  return names[numericLevel] ??
+    (isArabicUI()
+      ? `المستوى ${numericLevel}`
+      : `Level ${numericLevel}`);
+}
+
+function updateProgressUI() {
+  const total = Math.max(0, state.wordsTotal);
+  const completed =
+    total > 0 ? Math.min(Math.max(0, state.wordsCompleted), total) : 0;
+  const remaining = total > 0 ? Math.max(0, total - completed) : 0;
+  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  const ui = getUIText();
+
+  document.getElementById(
+    "stat-level"
+  ).textContent =
+    getLevelDisplayName(
+      state.placementLevel
+    );
+
+  const microLevelElement =
+    document.getElementById(
+      "stat-micro-level"
+    );
+
+  if (microLevelElement) {
+    microLevelElement.textContent =
+      isArabicUI()
+        ? `المرحلة ${state.currentMicroLevel}`
+        : `Stage ${state.currentMicroLevel}`;
+  }
+
+  document.getElementById("stat-words").textContent = `${completed} / ${total}`;
+  document.getElementById("stat-remaining").textContent = String(remaining);
+  document.getElementById("stat-progress").textContent = `${percentage}%`;
+  document.getElementById(
+    "progress-card-fill"
+  ).style.width = `${percentage}%`;
+}
+
+/* ============================================================
+   10 · PROFILE DROPDOWN
+============================================================ */
+function refreshProfileUI() {
+  document.getElementById("profile-name").textContent = state.user.name;
+  document.getElementById("profile-email").textContent = state.user.email;
+  document.getElementById("profile-avatar").textContent = initials(
+    state.user.name
+  );
+}
+
+profileBtn.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const isOpen = !profileDropdown.hidden;
+
+  if (isOpen) {
+    closeProfileDropdown();
+    return;
+  }
+
+  editName.value = state.user.name;
+  editEmail.value = state.user.email;
+  editPassword.value = "";
+  saveConfirm.hidden = true;
+  profileDropdown.hidden = false;
+  profileBtn.setAttribute("aria-expanded", "true");
+});
+
+function closeProfileDropdown() {
+  profileDropdown.hidden = true;
+  profileBtn.setAttribute("aria-expanded", "false");
+}
+
+document.addEventListener("click", (event) => {
+  if (
+    !profileDropdown.hidden &&
+    !profileDropdown.contains(event.target) &&
+    !profileBtn.contains(event.target)
+  ) {
+    closeProfileDropdown();
+  }
+});
+
+profileDropdown.addEventListener("click", (event) => event.stopPropagation());
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeProfileDropdown();
+});
+
+document.getElementById("save-profile").addEventListener("click", () => {
+  const name = editName.value.trim();
+  const email = editEmail.value.trim();
+
+  if (email && !isValidEmail(email)) {
+    editEmail.focus();
+    window.alert("Please enter a valid email address.");
+    return;
+  }
+
+  if (name) state.user.name = name;
+  if (email) {
+    state.user.email = email;
+    state.user.id = `user-${email.toLowerCase()}`;
+  }
+
+  refreshProfileUI();
+
+savePersistentLogin();
+addLogoutButton();
+
+saveConfirm.hidden = false;
+  setTimeout(closeProfileDropdown, 900);
+});
+/* ============================================================
+   RESTORE LOGIN ON PAGE LOAD
+============================================================ */
+
+restorePersistentLogin();
