@@ -29,79 +29,22 @@
           <span class="brand-name">Lehja <em>AI</em></span>
         </div>
 
-       <h1 class="login-title" id="auth-title">
-  Welcome back
-</h1>
+        <h1 class="login-title">Welcome back</h1>
+        <p class="login-sub">Sign in to keep learning Levantine Arabic.</p>
 
-<p class="login-sub" id="auth-subtitle">
-  Sign in to keep learning Levantine Arabic.
-</p>
         <form id="login-form" novalidate>
           <label class="field">
             <span class="field-label">Email</span>
             <input type="email" id="login-email" placeholder="you@example.com" autocomplete="email" />
           </label>
           <label class="field">
-  <span class="field-label">Password</span>
-  <input
-    type="password"
-    id="login-password"
-    placeholder="••••••••"
-    autocomplete="current-password"
-  />
-</label>
-
-<!-- Placement test language -->
-<fieldset class="language-picker">
-  <legend class="field-label">Choose the placement-test language</legend>
-
-  <div class="language-options">
-
-    <label class="language-option">
-      <input
-        type="radio"
-        name="placement-language"
-        value="MSA"
-        checked
-      />
-
-      <span class="language-card" dir="rtl">
-        <strong>العربية</strong>
-        <small>الأسئلة باللغة العربية الفصحى</small>
-      </span>
-    </label>
-
-    <label class="language-option">
-      <input
-        type="radio"
-        name="placement-language"
-        value="English"
-      />
-
-      <span class="language-card">
-        <strong>English</strong>
-        <small>Questions in English</small>
-      </span>
-    </label>
-
-  </div>
-</fieldset>
-
-<button
-  type="submit"
-  class="btn-primary btn-block"
-  id="auth-submit"
->
-  Log in
-</button>
+            <span class="field-label">Password</span>
+            <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+          </label>
+          <button type="submit" class="btn-primary btn-block">Continue</button>
         </form>
 
-        <p class="login-alt" id="auth-switch-text">
-  New here?
-  <a href="#" id="create-account-link">
-    Create an account
-  </a>
-</p>
+        <p class="login-alt">New here? <a href="#" id="create-account-link">Create an account</a></p>
       </div>
     </div>
 
@@ -144,9 +87,7 @@
     </div>
 
     <div class="test-card" id="test-card">
-      <p class="eyebrow" id="test-eyebrow">
-  Placement test
-</p>
+      <p class="eyebrow">Placement test</p>
       <h2 class="test-question" id="test-question">…</h2>
       <div class="test-options" id="test-options"></div>
       <div class="test-actions">
@@ -275,18 +216,18 @@
         </div>
         <div class="stat">
           <span class="stat-label">Words completed</span>
-          <span class="stat-value" id="stat-words">0 / 0</span>
+          <span class="stat-value" id="stat-words">18 / 40</span>
         </div>
         <div class="stat">
           <span class="stat-label">Words remaining</span>
-          <span class="stat-value" id="stat-remaining">0</span>
+          <span class="stat-value" id="stat-remaining">22</span>
         </div>
         <div class="stat">
           <span class="stat-label">Level progress</span>
-          <span class="stat-value accent" id="stat-progress">0%</span>
+          <span class="stat-value accent" id="stat-progress">45%</span>
         </div>
       </div>
-      <div class="progress-card-bar"><div class="progress-card-fill" id="progress-card-fill" style="width:0%"></div></div>
+      <div class="progress-card-bar"><div class="progress-card-fill" id="progress-card-fill" style="width:45%"></div></div>
     </div>
 
     <!-- Messages -->
@@ -311,5 +252,5 @@
 </section>
 
 <script src="script.js"></script>
-<script src="auth.js"></script></body>
+</body>
 </html>
